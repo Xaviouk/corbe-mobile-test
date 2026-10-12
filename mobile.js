@@ -50,7 +50,7 @@ const corbeSignatureTemplate = String.raw`<table cellpadding="0" cellspacing="0"
               <div style="font-family:'Trebuchet MS',Arial,Helvetica,sans-serif;
                           font-size:10px;line-height:12px;mso-line-height-rule:exactly;font-weight:400;
                           letter-spacing:2px;color:#3e4650;margin:0 0 0 2px;white-space:nowrap;">
-                Responsable SAV
+                {{JOB_TITLE_HTML}}
               </div>
             </td>
           </tr>
@@ -267,6 +267,7 @@ const corbeSignatureTemplate = String.raw`<table cellpadding="0" cellspacing="0"
 </tr>
 </table>`;
 
+
 function escapeHtml(value) {
   return String(value || "").replace(/[&<>\"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
 }
@@ -275,24 +276,102 @@ function formatPhone(value) {
   const d = digits(value);
   if (d.length === 10) return d.match(/.{1,2}/g).join(" ");
   if (d.length === 11 && d.startsWith("33")) return "0" + d.slice(2).match(/.{1,2}/g).join(" ");
-  return value || "";
+  return String(value || "").trim();
 }
-function getSignatureHtml(profile) {
-  const email = String(profile.emailAddress || "").trim().toLowerCase();
-  const displayName = String(profile.displayName || "").trim() || (email ? email.split("@")[0].replace(/[._-]+/g, " ") : "Nom indisponible");
-  const phoneRaw = "06 28 96 01 12"; // téléphone provisoire de test
+function splitName(displayName, email) {
+  const cleaned = String(displayName || "").trim();
+  if (cleaned) return cleaned;
+  const local = String(email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
+  return local.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+const CORBE_AUTH = {
+  clientId: "11d4d023-0187-483e-aa31-9b3f55153aee",
+  authority: "https://login.microsoftonline.com/75b354dc-0810-4caa-90a3-ac64ef88c77a",
+  redirectUri: "https://xaviouk.github.io/corbe49-signature-mobile/auth.html",
+  msalUrl: "https://xaviouk.github.io/corbe-mobile-test/vendor/msal-browser.min.js"
+};
+let corbePcaPromise;
+
+async function ensureMsalLoaded() {
+  if (window.msal && window.msal.createNestablePublicClientApplication) return;
+  if (typeof document === "undefined") throw new Error("Aucun document disponible pour charger MSAL dans le runtime Outlook.");
+
+  await new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-corbe-msal="true"]');
+    if (existing) {
+      if (window.msal && window.msal.createNestablePublicClientApplication) return resolve();
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", () => reject(new Error("Échec du chargement de MSAL Browser.")), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = CORBE_AUTH.msalUrl;
+    script.async = true;
+    script.dataset.corbeMsal = "true";
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Impossible de charger MSAL Browser depuis le dépôt CORBE."));
+    document.head.appendChild(script);
+  });
+  if (!window.msal || !window.msal.createNestablePublicClientApplication) {
+    throw new Error("MSAL est chargé, mais NAA n’est pas disponible.");
+  }
+}
+
+async function getCorbePca() {
+  await ensureMsalLoaded();
+  if (!corbePcaPromise) {
+    corbePcaPromise = window.msal.createNestablePublicClientApplication({
+      auth: {
+        clientId: CORBE_AUTH.clientId,
+        authority: CORBE_AUTH.authority,
+        redirectUri: CORBE_AUTH.redirectUri
+      },
+      cache: { cacheLocation: "localStorage" }
+    });
+  }
+  return corbePcaPromise;
+}
+
+async function getGraphProfile() {
+  try {
+    const pca = await getCorbePca();
+    const tokenResult = await pca.acquireTokenSilent({ scopes: ["User.Read"] });
+    const response = await fetch(
+      "https://graph.microsoft.com/v1.0/me?$select=displayName,jobTitle,mail,userPrincipalName,mobilePhone,businessPhones",
+      { headers: { Authorization: "Bearer " + tokenResult.accessToken } }
+    );
+    if (!response.ok) throw new Error("Microsoft Graph a répondu " + response.status);
+    return await response.json();
+  } catch (error) {
+    // Aucun écran de connexion pendant l'événement Outlook : repli sur les champs Outlook.
+    console.warn("Profil Graph indisponible en mode silencieux ; repli sur Outlook.", error);
+    return null;
+  }
+}
+
+function renderSignature(profile, graph) {
+  const email = String((graph && (graph.mail || graph.userPrincipalName)) || profile.emailAddress || "").trim().toLowerCase();
+  const displayName = splitName((graph && graph.displayName) || profile.displayName, email);
+  const jobTitle = String((graph && graph.jobTitle) || "").trim();
+  // Mobile en priorité ; sinon premier téléphone professionnel.
+  const phoneRaw = String((graph && graph.mobilePhone) || (graph && Array.isArray(graph.businessPhones) && graph.businessPhones[0]) || "").trim();
+  const phone = formatPhone(phoneRaw);
+  const photoUrl = email ? "https://www.corbe-cuisine-pro.com/wp-content/uploads/" + encodeURIComponent(email) + "_.png" : "";
+
   const replacements = {
-    "{{PHOTO_URL}}": email ? "https://www.corbe-cuisine-pro.com/wp-content/uploads/" + encodeURIComponent(email) + "_.png" : "https://www.corbe-cuisine-pro.com/wp-content/uploads/xavier.gaillard@corbe49.fr_.png",
+    "{{PHOTO_URL}}": photoUrl,
     "{{DISPLAY_NAME_HTML}}": escapeHtml(displayName).replace(/ /g, "&nbsp;"),
     "{{DISPLAY_NAME_ALT}}": escapeHtml(displayName),
-    "{{EMAIL_ATTR}}": escapeHtml(email || "xavier.gaillard@corbe49.fr"),
-    "{{EMAIL_HTML}}": escapeHtml(email || "E-MAIL OUTLOOK INDISPONIBLE"),
+    "{{JOB_TITLE_HTML}}": escapeHtml(jobTitle),
+    "{{EMAIL_ATTR}}": escapeHtml(email),
+    "{{EMAIL_HTML}}": escapeHtml(email),
     "{{PHONE_DIGITS}}": digits(phoneRaw),
-    "{{PHONE_HTML}}": escapeHtml(formatPhone(phoneRaw))
+    "{{PHONE_HTML}}": escapeHtml(phone)
   };
   let html = corbeSignatureTemplate;
   for (const [key, value] of Object.entries(replacements)) html = html.split(key).join(value);
-  return '<div style="font-family:Arial,sans-serif;background:#fff3cd;border:2px solid #e30613;padding:6px;margin:0 0 8px 0;color:#202c39;font-size:12px"><b>TEST CORBÉ 49 — SANS AUTHENTIFICATION</b><br>Si ce bandeau apparaît, le gestionnaire s’exécute et la signature est injectée.</div>' + html;
+  return '<div style="font-family:Arial,sans-serif;background:#fff3cd;border:2px solid #e30613;padding:6px;margin:0 0 8px 0;color:#202c39;font-size:12px"><b>TEST CORBÉ 49 — PROFIL MICROSOFT 365</b><br>Version de test : les champs proviennent de Graph lorsque l’authentification silencieuse est disponible.</div>' + html;
 }
 
 function onNewMessageComposeHandler(event) {
@@ -301,17 +380,21 @@ function onNewMessageComposeHandler(event) {
   try {
     const item = Office.context.mailbox.item;
     const profile = Office.context.mailbox.userProfile || {};
-    const signatureHtml = getSignatureHtml(profile);
-    item.body.setSignatureAsync(signatureHtml, { coercionType: Office.CoercionType.Html }, result => {
-      if (result.status === Office.AsyncResultStatus.Failed) {
-        console.log("Échec insertion signature CORBÉ 49 : " + ((result.error && result.error.message) || "erreur inconnue"));
-      }
-      finish();
+    getGraphProfile().then(graph => {
+      const signatureHtml = renderSignature(profile, graph);
+      item.body.setSignatureAsync(signatureHtml, { coercionType: Office.CoercionType.Html }, result => {
+        if (result.status === Office.AsyncResultStatus.Failed) {
+          console.log("Échec insertion signature CORBÉ 49 : " + ((result.error && result.error.message) || "erreur inconnue"));
+        }
+        finish();
+      });
+    }).catch(error => {
+      console.warn("Erreur inattendue Graph ; insertion avec les données Outlook.", error);
+      item.body.setSignatureAsync(renderSignature(profile, null), { coercionType: Office.CoercionType.Html }, () => finish());
     });
   } catch (error) {
     console.log("Erreur gestionnaire signature CORBÉ 49 :", error);
     finish();
   }
 }
-
 Office.actions.associate("onNewMessageComposeHandler", onNewMessageComposeHandler);
