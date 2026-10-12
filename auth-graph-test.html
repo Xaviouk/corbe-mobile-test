@@ -11,19 +11,14 @@
     pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f4f4; padding: 12px; border-radius: 6px; }
     .note { background: #fff3cd; border-left: 4px solid #e30613; padding: 10px 12px; }
   </style>
-  <script>
-    window.msalLoadError = null;
-    window.msalLoaded = false;
-  </script>
-  <script src="https://alcdn.msauth.net/browser/4.26.0/js/msal-browser.min.js"
-          onload="window.msalLoaded = !!window.msal"
-          onerror="window.msalLoadError = 'Impossible de charger MSAL depuis le CDN Microsoft.'"></script>
+  <script src="./vendor/msal-browser.min.js"></script>
 </head>
 <body>
   <h1>Test d’authentification CORBÉ 49</h1>
   <p>Page de test indépendante : elle ne modifie pas la signature Outlook.</p>
   <div class="note">
-    URI de redirection attendue : <code>https://xaviouk.github.io/corbe-mobile-test/auth-graph-test.html</code>
+    URI de redirection attendue :
+    <code>https://xaviouk.github.io/corbe-mobile-test/auth-graph-test.html</code>
   </div>
   <p><button id="login">Se connecter à Microsoft</button><button id="logout" disabled>Se déconnecter</button></p>
   <h2>Résultat</h2>
@@ -44,16 +39,13 @@
 
     async function loadProfile(account) {
       const tokenResult = await msalInstance.acquireTokenSilent({
-        account,
-        scopes: ["User.Read"]
+        account, scopes: ["User.Read"]
       });
-      const response = await fetch("https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName,jobTitle,businessPhones,mobilePhone", {
-        headers: { Authorization: "Bearer " + tokenResult.accessToken }
-      });
-      if (!response.ok) {
-        const details = await response.text();
-        throw new Error("Microsoft Graph a répondu " + response.status + " : " + details);
-      }
+      const response = await fetch(
+        "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName,jobTitle,businessPhones,mobilePhone",
+        { headers: { Authorization: "Bearer " + tokenResult.accessToken } }
+      );
+      if (!response.ok) throw new Error("Microsoft Graph a répondu " + response.status + " : " + await response.text());
       const profile = await response.json();
       show({
         status: "Connexion et appel Graph réussis",
@@ -70,9 +62,8 @@
 
     async function start() {
       if (!window.msal || !window.msal.PublicClientApplication) {
-        show("ERREUR : la bibliothèque MSAL n’a pas été chargée." +
-          "\n" + (window.msalLoadError || "Le script CDN n’a pas créé l’objet window.msal.") +
-          "\n\nVérifie la connexion Internet, le bloqueur de contenu ou le chargement du CDN Microsoft.");
+        show("ERREUR : MSAL n’a pas été chargé depuis ./vendor/msal-browser.min.js." +
+          "\nVérifie que le fichier existe dans le dossier vendor du dépôt GitHub.");
         loginButton.disabled = true;
         return;
       }
@@ -88,25 +79,24 @@
         await msalInstance.initialize();
         ready = true;
         const redirectResult = await msalInstance.handleRedirectPromise();
-        const accounts = msalInstance.getAllAccounts();
-        const account = (redirectResult && redirectResult.account) || accounts[0];
+        const account = (redirectResult && redirectResult.account) || msalInstance.getAllAccounts()[0];
         if (account) await loadProfile(account);
-        else show("MSAL chargé. Prêt à lancer la connexion.\nURI : " + REDIRECT_URI);
+        else show("MSAL chargé localement. Prêt à lancer la connexion.\nURI : " + REDIRECT_URI);
       } catch (error) {
-        show("Erreur au démarrage : " + (error && error.message ? error.message : String(error)));
+        show("Erreur au démarrage : " + (error?.message || String(error)));
       }
     }
 
     loginButton.addEventListener("click", async () => {
       if (!ready || !msalInstance) {
-        show("Connexion impossible : MSAL n’est pas prêt. Recharge la page avec Ctrl+F5 et vérifie le résultat ci-dessus.");
+        show("MSAL n’est pas prêt. Vérifie le fichier vendor/msal-browser.min.js.");
         return;
       }
       try {
         show("Redirection vers Microsoft en cours…");
         await msalInstance.loginRedirect({ scopes: ["User.Read"] });
       } catch (error) {
-        show("Erreur de connexion : " + (error && error.message ? error.message : String(error)));
+        show("Erreur de connexion : " + (error?.message || String(error)));
       }
     });
 
@@ -115,10 +105,9 @@
         const account = msalInstance.getActiveAccount() || msalInstance.getAllAccounts()[0];
         await msalInstance.logoutRedirect({ account, postLogoutRedirectUri: REDIRECT_URI });
       } catch (error) {
-        show("Erreur de déconnexion : " + (error && error.message ? error.message : String(error)));
+        show("Erreur de déconnexion : " + (error?.message || String(error)));
       }
     });
-
     start();
   </script>
 </body>
