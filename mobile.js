@@ -371,10 +371,7 @@ function renderSignature(profile, graph) {
   };
   let html = corbeSignatureTemplate;
   for (const [key, value] of Object.entries(replacements)) html = html.split(key).join(value);
-  const graphStatusBanner = graph
-    ? '<div style="font-family:Arial,sans-serif;background:#e8f5e9;border:2px solid #16803c;padding:7px;margin:0 0 8px 0;color:#202c39;font-size:12px"><b>TEST CORBÉ 49 — GRAPH OK</b><br>Profil Microsoft 365 récupéré avec succès. Les champs disponibles ci-dessous proviennent de Microsoft Graph.</div>'
-    : '<div style="font-family:Arial,sans-serif;background:#fff3cd;border:2px solid #e30613;padding:7px;margin:0 0 8px 0;color:#202c39;font-size:12px"><b>TEST CORBÉ 49 — GRAPH NON DISPONIBLE</b><br>Le profil Microsoft 365 n’a pas été récupéré. La signature utilise les informations Outlook disponibles ; fonction et téléphone peuvent rester vides.</div>';
-  return graphStatusBanner + html;
+  return html;
 }
 
 function onNewMessageComposeHandler(event) {
